@@ -409,6 +409,11 @@ class DeployController extends Controller
         foreach ($uuids as $uuid) {
             $resource = getResourceByUuid($uuid, $teamId);
             if ($resource) {
+                if (! apiTokenAllowsEnvironment($this->environmentIdFor($resource))) {
+                    return response()->json([
+                        'message' => 'This API token is restricted to specific environments and cannot deploy this resource.',
+                    ], 403);
+                }
                 $dockerTagForResource = $dockerTag;
                 $preview = null;
                 if ($pr !== 0) {
@@ -464,6 +469,13 @@ class DeployController extends Controller
             }
             $applications = $found_tag->applications()->whereRelation('environment.project', 'team_id', $team_id)->get();
             $services = $found_tag->services()->whereRelation('environment.project', 'team_id', $team_id)->get();
+
+            $scopedEnvironmentIds = apiTokenScopedEnvironmentIds();
+            if ($scopedEnvironmentIds !== null) {
+                $applications = $applications->filter(fn ($resource) => in_array((int) $resource->environment_id, $scopedEnvironmentIds, true));
+                $services = $services->filter(fn ($resource) => in_array((int) $resource->environment_id, $scopedEnvironmentIds, true));
+            }
+
             if ($applications->count() === 0 && $services->count() === 0) {
                 $message->push("No resources found for tag {$tag}.");
 
@@ -495,6 +507,17 @@ class DeployController extends Controller
         }
 
         return response()->json(['message' => 'No resources found with this tag.'], 404);
+    }
+
+    /**
+     * Resolve the environment id of a deployable resource.
+     * Service databases/applications inherit the environment from their service.
+     */
+    private function environmentIdFor($resource): ?int
+    {
+        $environmentId = $resource->environment_id ?? $resource->service?->environment_id;
+
+        return is_null($environmentId) ? null : (int) $environmentId;
     }
 
     public function deploy_resource($resource, bool $force = false, int $pr = 0, ?string $dockerTag = null, ?string $gitType = null): array

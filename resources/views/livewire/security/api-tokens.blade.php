@@ -89,6 +89,44 @@
                                 </div>
                             </div>
                         </div>
+
+                        <div class="mt-5 border-t border-neutral-200 pt-4 dark:border-white/[0.08]">
+                            <div class="mb-3 flex items-center gap-2">
+                                <h4 class="text-[12px] font-semibold text-black dark:text-fg">Access scope</h4>
+                                <x-helper helper="Restricted tokens can only reach the selected environments." />
+                            </div>
+
+                            <x-forms.checkbox id="restrictToEnvironments" label="Restrict to specific environments"
+                                fullWidth :live="true"
+                                helper="Leave off to allow access to every environment of this team." />
+
+                            @if ($restrictToEnvironments)
+                                <div
+                                    class="mt-3 max-h-64 overflow-y-auto rounded-lg border border-neutral-200 dark:border-white/[0.08]">
+                                    @forelse ($environmentGroups as $projectName => $environments)
+                                        <div
+                                            class="border-b border-neutral-200 last:border-b-0 dark:border-white/[0.07]">
+                                            <div
+                                                class="px-3 pt-2.5 pb-1 text-[11px] font-semibold text-neutral-500 dark:text-fg-dim">
+                                                {{ $projectName }}</div>
+                                            @foreach ($environments as $environment)
+                                                <x-forms.checkbox id="env-{{ $environment['id'] }}"
+                                                    label="{{ $environment['name'] }}" fullWidth
+                                                    wire:model.live="selectedEnvironmentIds"
+                                                    domValue="{{ $environment['id'] }}"
+                                                    :checked="in_array($environment['id'], array_map('strval', $selectedEnvironmentIds), true)" />
+                                            @endforeach
+                                        </div>
+                                    @empty
+                                        <div class="p-3 text-[12px] text-neutral-500 dark:text-fg-dim">No environments
+                                            available.</div>
+                                    @endforelse
+                                </div>
+                                @error('selectedEnvironmentIds')
+                                    <p class="mt-2 text-[11px] text-error">{{ $message }}</p>
+                                @enderror
+                            @endif
+                        </div>
                     </x-application.settings-section>
                 </form>
             @endcan
@@ -116,7 +154,7 @@
                     perPage: 10,
                     tokens: @js($tokens->map(fn ($token) => [
                         'id' => (string) $token->id,
-                        'search' => strtolower($token->name . ' ' . implode(' ', $token->abilities ?? [])),
+                        'search' => strtolower($token->name . ' ' . implode(' ', $token->abilities ?? []) . ' ' . collect($token->scopedEnvironmentIds())->map(fn ($environmentId) => $environmentNames[$environmentId] ?? '')->implode(' ')),
                     ])->values()),
                     get filteredTokens() {
                         const query = this.search.trim().toLowerCase();
@@ -172,6 +210,7 @@
                             <div class="data-table-header api-tokens-table-grid">
                                 <span>Description</span>
                                 <span>Permissions</span>
+                                <span>Scope</span>
                                 <span>Last used</span>
                                 <span>Created</span>
                                 <span>Expires</span>
@@ -194,6 +233,19 @@
                                                 'border-neutral-200 bg-neutral-100 text-neutral-600 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-fg-dim' => in_array($ability, ['read', 'read:sensitive']),
                                             ])>{{ $ability }}</span>
                                         @endforeach
+                                    </div>
+                                    <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                                        @if (! $token->isEnvironmentScoped())
+                                            <span
+                                                class="inline-flex min-h-5 items-center rounded-md border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-fg-dim">All environments</span>
+                                        @else
+                                            @foreach ($token->scopedEnvironmentIds() as $environmentId)
+                                                <span
+                                                    class="inline-flex min-h-5 items-center rounded-md border border-coollabs/20 bg-coollabs/10 px-2 py-0.5 text-[10px] font-medium text-coollabs dark:border-warning/20 dark:bg-warning/10 dark:text-warning">
+                                                    {{ $environmentNames[$environmentId] ?? 'Environment #'.$environmentId }}
+                                                </span>
+                                            @endforeach
+                                        @endif
                                     </div>
                                     <div class="text-[11px] text-neutral-500 dark:text-fg-dim">
                                         {{ $token->last_used_at?->diffForHumans() ?? 'Never' }}

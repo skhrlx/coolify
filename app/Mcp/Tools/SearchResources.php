@@ -44,7 +44,10 @@ class SearchResources extends Tool
         $limit = max(1, min(50, (int) ($request->get('limit') ?? 25)));
 
         $types = $request->get('types');
-        $allowed = ['application', 'service', 'database', 'server', 'project'];
+        $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+        $allowed = $scopedEnvironmentIds === null
+            ? ['application', 'service', 'database', 'server', 'project']
+            : ['application', 'service', 'database'];
         if ($types !== null) {
             if (! is_string($types) && ! is_array($types)) {
                 return $this->mcpError($request, 'types must be a comma-separated string or omitted.');
@@ -100,6 +103,7 @@ class SearchResources extends Tool
         if (in_array('application', $typesList, true)) {
             Application::ownedByCurrentTeamAPI($teamId)
                 ->with(['environment.project:id,uuid,name,team_id'])
+                ->when($scopedEnvironmentIds !== null, fn ($q) => $q->whereIn('environment_id', $scopedEnvironmentIds))
                 ->where(function ($q) use ($like, $needle) {
                     $q->whereRaw('LOWER(name) LIKE ?', [$like])
                         ->orWhere('uuid', $needle)
@@ -123,6 +127,7 @@ class SearchResources extends Tool
         if (in_array('service', $typesList, true)) {
             Service::whereHas('environment.project', fn ($q) => $q->where('team_id', $teamId))
                 ->with(['environment.project:id,uuid,name,team_id'])
+                ->when($scopedEnvironmentIds !== null, fn ($q) => $q->whereIn('environment_id', $scopedEnvironmentIds))
                 ->where(function ($q) use ($like, $needle) {
                     $q->whereRaw('LOWER(name) LIKE ?', [$like])
                         ->orWhere('uuid', $needle);
@@ -146,6 +151,10 @@ class SearchResources extends Tool
                 ->whereIn('project_id', $projects->keys())
                 ->pluck('project_id', 'id');
             $envIds = $envToProject->keys();
+
+            if ($scopedEnvironmentIds !== null) {
+                $envIds = $envIds->intersect($scopedEnvironmentIds)->values();
+            }
 
             if ($envIds->isNotEmpty()) {
                 foreach (STANDALONE_DATABASE_MODELS as $modelClass) {

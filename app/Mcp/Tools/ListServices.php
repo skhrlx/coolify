@@ -107,6 +107,11 @@ class ListServices extends Tool
             })
             ->when(is_string($name), fn ($query) => $query->whereRaw('LOWER(name) LIKE ?', ['%'.strtolower($name).'%']));
 
+        $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $query->whereIn('environment_id', $scopedEnvironmentIds);
+        }
+
         if (is_string($status)) {
             // Status is a computed accessor over applications/databases, so filter
             // in PHP — but scan in chunks so large teams never hydrate every service.

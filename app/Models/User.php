@@ -261,7 +261,15 @@ class User extends Authenticatable implements SendsEmail
         return $new_team;
     }
 
-    public function createToken(string $name, array $abilities = ['read'], ?DateTimeInterface $expiresAt = null)
+    /**
+     * Create a new personal access token for the current team.
+     *
+     * When $scopedEnvironmentIds is provided (and not empty) the token is restricted
+     * to those environments. Pass null to keep the token unscoped (whole team).
+     *
+     * @param  array<int, int|string>|null  $scopedEnvironmentIds
+     */
+    public function createToken(string $name, array $abilities = ['read'], ?DateTimeInterface $expiresAt = null, ?array $scopedEnvironmentIds = null)
     {
         $plainTextToken = sprintf(
             '%s%s%s',
@@ -270,12 +278,19 @@ class User extends Authenticatable implements SendsEmail
             hash('crc32b', $tokenEntropy)
         );
 
+        $scopedEnvironmentIds = collect($scopedEnvironmentIds ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
         $token = $this->tokens()->create([
             'name' => $name,
             'token' => hash('sha256', $plainTextToken),
             'abilities' => $abilities,
             'expires_at' => $expiresAt,
             'team_id' => session('currentTeam')->id,
+            'scoped_environment_ids' => $scopedEnvironmentIds === [] ? null : $scopedEnvironmentIds,
         ]);
 
         return new NewAccessToken($token, $token->getKey().'|'.$plainTextToken);

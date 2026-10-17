@@ -307,8 +307,13 @@ class ApplicationsController extends Controller
             ? ['destination.server.settings']
             : [];
 
+        $scopedEnvironmentIds = apiTokenScopedEnvironmentIds();
+
         $applications = Application::ownedByCurrentTeamAPI($teamId)
             ->with($applicationRelations)
+            ->when($scopedEnvironmentIds !== null, function ($query) use ($scopedEnvironmentIds) {
+                $query->whereIn('environment_id', $scopedEnvironmentIds);
+            })
             ->when($tagName, function ($query, $tagName) {
                 $query->whereHas('tags', function ($query) use ($tagName) {
                     $query->where('name', $tagName);

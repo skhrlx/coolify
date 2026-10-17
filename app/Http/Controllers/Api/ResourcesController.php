@@ -55,6 +55,14 @@ class ResourcesController extends Controller
             $resources->push($projects->pluck(str($db)->plural(2))->flatten());
         }
         $resources = $resources->flatten();
+
+        $scopedEnvironmentIds = apiTokenScopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $resources = $resources->filter(
+                fn ($resource) => in_array((int) $resource->environment_id, $scopedEnvironmentIds, true)
+            );
+        }
+
         $resources = $resources->map(function ($resource) {
             exposeSensitiveFields($resource);
             $payload = $resource->toArray();

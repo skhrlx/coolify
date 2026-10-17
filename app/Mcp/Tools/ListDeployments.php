@@ -44,6 +44,11 @@ class ListDeployments extends Tool
                 return $this->mcpError($request, "Application [{$applicationUuid}] not found.", ['resource_uuid' => $applicationUuid]);
             }
 
+            $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+            if ($scopedEnvironmentIds !== null && ! in_array((int) $application->environment_id, $scopedEnvironmentIds, true)) {
+                return $this->scopeDenied($request, $this->name);
+            }
+
             $query = ApplicationDeploymentQueue::query()
                 ->where('application_id', $application->id)
                 ->orderByDesc('created_at');
@@ -70,7 +75,14 @@ class ListDeployments extends Tool
 
         // application_deployment_queues.application_id is varchar; whereHas joins to
         // applications.id (bigint) and breaks on PostgreSQL. Scope via string IDs instead.
-        $teamApplicationIds = Application::ownedByCurrentTeamAPI($teamId)
+        $applicationQuery = Application::ownedByCurrentTeamAPI($teamId);
+
+        $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $applicationQuery->whereIn('environment_id', $scopedEnvironmentIds);
+        }
+
+        $teamApplicationIds = $applicationQuery
             ->pluck('id')
             ->map(fn ($id) => (string) $id);
 

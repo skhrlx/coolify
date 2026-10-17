@@ -279,6 +279,13 @@ class ServicesController extends Controller
             );
         }
 
+        $scopedEnvironmentIds = apiTokenScopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $services = $services->filter(
+                fn ($service) => in_array((int) $service->environment_id, $scopedEnvironmentIds, true)
+            );
+        }
+
         return response()->json($services->values());
     }
 

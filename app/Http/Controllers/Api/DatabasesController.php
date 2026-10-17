@@ -292,6 +292,13 @@ class DatabasesController extends Controller
             $databases = $databases->merge($project->databases($databaseRelations));
         }
 
+        $scopedEnvironmentIds = apiTokenScopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $databases = $databases->filter(
+                fn ($database) => in_array((int) $database->environment_id, $scopedEnvironmentIds, true)
+            );
+        }
+
         if ($request->attributes->get('can_read_sensitive', false) === true) {
             // Their connection URLs read REDIS_PASSWORD; load the variables once per type instead of per database.
             $databases

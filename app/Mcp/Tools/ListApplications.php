@@ -112,6 +112,11 @@ class ListApplications extends Tool
             ->when(is_string($status), fn ($query) => $query->whereRaw('LOWER(status) LIKE ?', ['%'.strtolower($status).'%']))
             ->when(is_string($name), fn ($query) => $query->whereRaw('LOWER(name) LIKE ?', ['%'.strtolower($name).'%']));
 
+        $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $query->whereIn('environment_id', $scopedEnvironmentIds);
+        }
+
         $total = (clone $query)->count();
 
         $summaries = $query

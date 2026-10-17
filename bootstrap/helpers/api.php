@@ -8,6 +8,7 @@ use App\Models\Application;
 use App\Models\ApplicationSetting;
 use App\Models\Environment;
 use App\Models\EnvironmentVariable;
+use App\Models\PersonalAccessToken;
 use App\Models\ServerSetting;
 use App\Models\StandaloneDocker;
 use App\Models\SwarmDocker;
@@ -39,6 +40,44 @@ function getTeamIdFromToken()
 function invalidTokenResponse()
 {
     return response()->json(['message' => 'Invalid token.', 'docs' => 'https://coolify.io/docs/api-reference/authorization'], 400);
+}
+
+/**
+ * The personal access token authenticating the current request, when there is one.
+ */
+function currentApiToken(): ?PersonalAccessToken
+{
+    $token = auth()->user()?->currentAccessToken();
+
+    return $token instanceof PersonalAccessToken ? $token : null;
+}
+
+/**
+ * Environment ids the current API token is restricted to.
+ *
+ * Returns null when the token is unscoped (full team access) or when there is no
+ * token — callers must treat null as "no restriction".
+ *
+ * @return array<int, int>|null
+ */
+function apiTokenScopedEnvironmentIds(): ?array
+{
+    $token = currentApiToken();
+
+    if (! $token instanceof PersonalAccessToken || ! $token->isEnvironmentScoped()) {
+        return null;
+    }
+
+    return $token->scopedEnvironmentIds();
+}
+
+/**
+ * Whether the current API token may act on the given environment.
+ * Unscoped tokens and non-token requests are allowed.
+ */
+function apiTokenAllowsEnvironment(?int $environmentId): bool
+{
+    return currentApiToken()?->allowsEnvironment($environmentId) ?? true;
 }
 
 function serializeApiResponse($data)

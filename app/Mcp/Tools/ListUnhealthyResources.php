@@ -41,6 +41,8 @@ class ListUnhealthyResources extends Tool
         $sampleOnly = filter_var($request->get('sample_only'), FILTER_VALIDATE_BOOLEAN);
         $samplePerType = max(1, min(20, (int) ($request->get('sample_per_type') ?? 5)));
 
+        $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+
         // Prefer smaller pages for this heavy tool (default 20 unless caller sets per_page).
         if ($request->get('per_page') === null) {
             $request->merge(['per_page' => 20]);
@@ -48,32 +50,37 @@ class ListUnhealthyResources extends Tool
         $args = $this->paginationArgs($request);
 
         // --- Servers (small set; filter via settings) ---
-        $unhealthyServers = Server::whereTeamId($teamId)
-            ->with('settings:id,server_id,is_reachable,is_usable')
-            ->whereHas('settings', function ($q) {
-                $q->where('is_reachable', false)->orWhere('is_usable', false);
-            })
-            ->orderBy('name')
-            ->orderBy('id')
-            ->get()
-            ->map(function ($server) {
-                $reachable = (bool) $server->settings?->is_reachable;
-                $usable = (bool) $server->settings?->is_usable;
+        // Servers are team-level and never exposed to environment-scoped tokens.
+        $unhealthyServers = collect();
+        if ($scopedEnvironmentIds === null) {
+            $unhealthyServers = Server::whereTeamId($teamId)
+                ->with('settings:id,server_id,is_reachable,is_usable')
+                ->whereHas('settings', function ($q) {
+                    $q->where('is_reachable', false)->orWhere('is_usable', false);
+                })
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get()
+                ->map(function ($server) {
+                    $reachable = (bool) $server->settings?->is_reachable;
+                    $usable = (bool) $server->settings?->is_usable;
 
-                return [
-                    'type' => 'server',
-                    'uuid' => $server->uuid,
-                    'name' => $server->name,
-                    'status' => $reachable ? 'unreachable_or_unusable' : 'unreachable',
-                    'is_reachable' => $reachable,
-                    'is_usable' => $usable,
-                    'reason' => ! $reachable ? 'server_unreachable' : 'server_not_usable',
-                ];
-            });
+                    return [
+                        'type' => 'server',
+                        'uuid' => $server->uuid,
+                        'name' => $server->name,
+                        'status' => $reachable ? 'unreachable_or_unusable' : 'unreachable',
+                        'is_reachable' => $reachable,
+                        'is_usable' => $usable,
+                        'reason' => ! $reachable ? 'server_unreachable' : 'server_not_usable',
+                    ];
+                });
+        }
 
         // --- Applications (SQL on status column) ---
         $appQuery = Application::ownedByCurrentTeamAPI($teamId)
-            ->with(['environment.project:id,uuid,name,team_id']);
+            ->with(['environment.project:id,uuid,name,team_id'])
+            ->when($scopedEnvironmentIds !== null, fn ($q) => $q->whereIn('environment_id', $scopedEnvironmentIds));
         $this->scopeNotHealthyRunning($appQuery);
         $appCount = (clone $appQuery)->count();
 
@@ -84,6 +91,7 @@ class ListUnhealthyResources extends Tool
             $samplePerType,
             skip: 0,
             take: $sampleOnly ? $samplePerType : 0,
+            scopedEnvironmentIds: $scopedEnvironmentIds,
         );
 
         [$dbCount, $dbSamples] = $this->collectUnhealthyDatabases(
@@ -92,6 +100,7 @@ class ListUnhealthyResources extends Tool
             $samplePerType,
             skip: 0,
             take: $sampleOnly ? $samplePerType : 0,
+            scopedEnvironmentIds: $scopedEnvironmentIds,
         );
 
         $summary = [
@@ -139,6 +148,7 @@ class ListUnhealthyResources extends Tool
             $dbCount,
             $args['offset'],
             $args['per_page'],
+            $scopedEnvironmentIds,
         );
 
         return $this->mcpSuccess($request, $this->respond(
@@ -166,6 +176,7 @@ class ListUnhealthyResources extends Tool
         int $dbCount,
         int $offset,
         int $perPage,
+        ?array $scopedEnvironmentIds = null,
     ): array {
         $skip = $offset;
         $need = $perPage;
@@ -217,6 +228,7 @@ class ListUnhealthyResources extends Tool
                     skip: $skip,
                     take: $need,
                     needsCount: false,
+                    scopedEnvironmentIds: $scopedEnvironmentIds,
                 );
                 $rows = $serviceRows->values()->all();
                 $page = array_merge($page, $rows);
@@ -236,6 +248,7 @@ class ListUnhealthyResources extends Tool
                     samplePerType: 1,
                     skip: $skip,
                     take: $need,
+                    scopedEnvironmentIds: $scopedEnvironmentIds,
                 );
                 $page = array_merge($page, $dbRows->values()->all());
             }
@@ -273,6 +286,7 @@ class ListUnhealthyResources extends Tool
         int $skip = 0,
         ?int $take = null,
         bool $needsCount = true,
+        ?array $scopedEnvironmentIds = null,
     ): array {
         $base = Service::whereHas('environment.project', fn ($q) => $q->where('team_id', $teamId))
             ->with([
@@ -280,6 +294,7 @@ class ListUnhealthyResources extends Tool
                 'applications:id,service_id,status,exclude_from_status',
                 'databases:id,service_id,status,exclude_from_status',
             ])
+            ->when($scopedEnvironmentIds !== null, fn ($q) => $q->whereIn('environment_id', $scopedEnvironmentIds))
             ->orderBy('name')
             ->orderBy('id');
 
@@ -337,6 +352,7 @@ class ListUnhealthyResources extends Tool
         int $samplePerType,
         int $skip = 0,
         ?int $take = null,
+        ?array $scopedEnvironmentIds = null,
     ): array {
         $projects = Project::where('team_id', $teamId)->select('id', 'uuid', 'name')->get()->keyBy('id');
         $envToProject = Environment::query()
@@ -344,6 +360,11 @@ class ListUnhealthyResources extends Tool
             ->pluck('project_id', 'id');
 
         $envIds = $envToProject->keys();
+
+        if ($scopedEnvironmentIds !== null) {
+            $envIds = $envIds->intersect($scopedEnvironmentIds)->values();
+        }
+
         $dbItems = collect();
         $dbCount = 0;
 

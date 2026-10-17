@@ -84,13 +84,10 @@ RUN echo "alias ll='ls -al'" >> /etc/profile && \
     echo "alias logs='tail -f storage/logs/laravel.log'" >> /etc/profile
 
 # Install Cloudflared based on architecture
-RUN mkdir -p /usr/local/bin && \
-    if [ "${TARGETPLATFORM}" = "linux/amd64" ]; then \
-        curl -sSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" -o /usr/local/bin/cloudflared; \
-    elif [ "${TARGETPLATFORM}" = "linux/arm64" ]; then \
-        curl -sSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-arm64" -o /usr/local/bin/cloudflared; \
-    fi && \
-    chmod +x /usr/local/bin/cloudflared
+# LOCAL-ONLY PATCH (revert before committing): GitHub release assets (185.199.x.x) are
+# unreachable from this Docker VM, so the binary is copied from the build context instead.
+COPY cloudflared-linux-amd64.tmp /usr/local/bin/cloudflared
+RUN chmod +x /usr/local/bin/cloudflared
 
 # Configure PHP
 COPY docker/development/etc/php/conf.d/zzz-custom-php.ini /usr/local/etc/php/conf.d/zzz-custom-php.ini

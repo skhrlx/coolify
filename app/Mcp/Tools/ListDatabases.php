@@ -99,6 +99,12 @@ class ListDatabases extends Tool
         }
 
         $envIds = $envQuery->pluck('id');
+
+        $scopedEnvironmentIds = $this->scopedEnvironmentIds();
+        if ($scopedEnvironmentIds !== null) {
+            $envIds = $envIds->intersect($scopedEnvironmentIds)->values();
+        }
+
         if ($envIds->isEmpty()) {
             return $this->mcpSuccess($request, $this->respond(
                 [],

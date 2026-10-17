@@ -58,6 +58,7 @@ class ListResources extends Tool
             is_string($typeFilter) ? $typeFilter : null,
             is_string($projectUuid) ? $projectUuid : null,
             is_string($tagName) ? $tagName : null,
+            $this->scopedEnvironmentIds(),
         );
 
         $extra = array_filter([
@@ -102,20 +103,21 @@ class ListResources extends Tool
         ?string $typeFilter,
         ?string $projectUuid,
         ?string $tagName,
+        ?array $scopedEnvironmentIds = null,
     ): ?QueryBuilder {
         $parts = [];
 
         if ($typeFilter === null || $typeFilter === 'application') {
-            $parts[] = $this->applicationQuery($teamId, $projectUuid, $tagName);
+            $parts[] = $this->applicationQuery($teamId, $projectUuid, $tagName, $scopedEnvironmentIds);
         }
 
         if ($typeFilter === null || $typeFilter === 'service') {
-            $parts[] = $this->serviceQuery($teamId, $projectUuid, $tagName);
+            $parts[] = $this->serviceQuery($teamId, $projectUuid, $tagName, $scopedEnvironmentIds);
         }
 
         if ($typeFilter === null || $typeFilter === 'database') {
             foreach (STANDALONE_DATABASE_MODELS as $typeKey => $modelClass) {
-                $parts[] = $this->databaseQuery($modelClass, (string) $typeKey, $teamId, $projectUuid, $tagName);
+                $parts[] = $this->databaseQuery($modelClass, (string) $typeKey, $teamId, $projectUuid, $tagName, $scopedEnvironmentIds);
             }
         }
 
@@ -132,7 +134,10 @@ class ListResources extends Tool
         return $union->toBase();
     }
 
-    private function applicationQuery(int $teamId, ?string $projectUuid, ?string $tagName): Builder
+    /**
+     * @param  array<int, int>|null  $scopedEnvironmentIds
+     */
+    private function applicationQuery(int $teamId, ?string $projectUuid, ?string $tagName, ?array $scopedEnvironmentIds = null): Builder
     {
         // Drop withCount global scope so UNION column counts match other resource selects.
         $query = Application::query()
@@ -147,14 +152,18 @@ class ListResources extends Tool
             ])
             ->join('environments', 'applications.environment_id', '=', 'environments.id')
             ->join('projects', 'environments.project_id', '=', 'projects.id')
-            ->where('projects.team_id', $teamId);
+            ->where('projects.team_id', $teamId)
+            ->when(is_array($scopedEnvironmentIds), fn ($q) => $q->whereIn('environments.id', $scopedEnvironmentIds));
 
         $this->applyProjectAndTagFilters($query, 'applications', Application::class, $projectUuid, $tagName);
 
         return $query;
     }
 
-    private function serviceQuery(int $teamId, ?string $projectUuid, ?string $tagName): Builder
+    /**
+     * @param  array<int, int>|null  $scopedEnvironmentIds
+     */
+    private function serviceQuery(int $teamId, ?string $projectUuid, ?string $tagName, ?array $scopedEnvironmentIds = null): Builder
     {
         // Service status is a computed accessor, not a column — fill per page later.
         $query = Service::query()
@@ -168,7 +177,8 @@ class ListResources extends Tool
             ])
             ->join('environments', 'services.environment_id', '=', 'environments.id')
             ->join('projects', 'environments.project_id', '=', 'projects.id')
-            ->where('projects.team_id', $teamId);
+            ->where('projects.team_id', $teamId)
+            ->when(is_array($scopedEnvironmentIds), fn ($q) => $q->whereIn('environments.id', $scopedEnvironmentIds));
 
         $this->applyProjectAndTagFilters($query, 'services', Service::class, $projectUuid, $tagName);
 
@@ -177,6 +187,7 @@ class ListResources extends Tool
 
     /**
      * @param  class-string  $modelClass
+     * @param  array<int, int>|null  $scopedEnvironmentIds
      */
     private function databaseQuery(
         string $modelClass,
@@ -184,6 +195,7 @@ class ListResources extends Tool
         int $teamId,
         ?string $projectUuid,
         ?string $tagName,
+        ?array $scopedEnvironmentIds = null,
     ): Builder {
         /** @var Model $model */
         $model = new $modelClass;
@@ -204,7 +216,8 @@ class ListResources extends Tool
             ])
             ->join('environments', "{$table}.environment_id", '=', 'environments.id')
             ->join('projects', 'environments.project_id', '=', 'projects.id')
-            ->where('projects.team_id', $teamId);
+            ->where('projects.team_id', $teamId)
+            ->when(is_array($scopedEnvironmentIds), fn ($q) => $q->whereIn('environments.id', $scopedEnvironmentIds));
 
         $this->applyProjectAndTagFilters($query, $table, $modelClass, $projectUuid, $tagName);
 
